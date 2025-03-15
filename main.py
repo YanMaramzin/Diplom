@@ -1,6 +1,7 @@
 import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
+from scipy.signal import find_peaks
 from scipy import signal
 
 class AdvancedDOASystem:
@@ -9,7 +10,7 @@ class AdvancedDOASystem:
         self.num_antennas = 8
         self.freq = 900e6
         self.wavelength = 3e8 / self.freq
-        self.snr_db = -1000
+        self.snr_db = 20
         self.num_sources = 3
         self.current_view = "cartesian"
         self.max_spectrum = 1e6
@@ -34,7 +35,7 @@ class AdvancedDOASystem:
         self.antenna_pos = self.create_antenna_array()
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.update)
-        self.timer.start(1000)
+        self.timer.start(5000)
 
     def _init_graphs(self):
         # Панель управления графиками
@@ -204,9 +205,12 @@ class AdvancedDOASystem:
             ) / self.wavelength)
             spectrum[i] = 1 / np.linalg.norm(noise_subspace.conj().T @ a) ** 2
 
-        return theta_range, spectrum / self.max_spectrum
+        peaks, _ = find_peaks(spectrum, height=0.5 * np.max(spectrum), distance=10)
+        estimated_angles = theta_range[peaks][:self.num_sources]  # Ограничение по числу источников
 
-    def update_map(self):
+        return estimated_angles, theta_range, spectrum / self.max_spectrum
+
+    def update_map(self, estimated_angles):
         # """Обновление карты местности"""
         # for i in range(self.num_sources):
         #     # Преобразование полярных координат в декартовы
@@ -218,36 +222,80 @@ class AdvancedDOASystem:
         #         [0, x],
         #         [0, y],
         #         pen=pg.mkPen(['#FF0000', '#00FF00', '#0000FF'][i], width=2)
-        #     )
-        """Обновление карты: линии, маркеры и подписи"""
-        positions = []
+        # #     )
+        # """Обновление карты: линии, маркеры и подписи"""
+        # positions = []
+        # display_distance = self.range_limit * 0.8
+        #
+        # # Расчет координат и обновление элементов
+        # for i in range(self.num_sources):
+        #     # Полярные -> декартовы
+        #     angle_rad = np.radians(self.source_angles[i])
+        #     x = self.source_distances[i] * np.cos(angle_rad)
+        #     y = self.source_distances[i] * np.sin(angle_rad)
+        #     positions.append((x, y))
+        #
+        #     # Линии направления
+        #     if i < len(self.target_lines):
+        #         self.target_lines[i].setData([0, x], [0, y],
+        #                                      pen=pg.mkPen(['#FF0000', '#00FF00', '#0000FF'][i], width=2))
+        #
+        #     # Маркеры и подписи
+        #     if i < len(self.target_markers):
+        #         self.target_markers[i].setData([x], [y])
+        #         self.target_labels[i].setPos(x, y)
+        #
+        # # Сброс неиспользуемых элементов
+        # for j in range(len(positions), len(self.target_markers)):
+        #     self.target_markers[j].setData([], [])
+        #     self.target_labels[j].setPos(-1000, -1000)
+        # display_distance = self.range_limit * 0.8
+        # valid_angles = estimated_angles[:self.num_sources]  # Обрезаем лишние
+        #
+        # # Обновление линий направлений
+        # for i, line in enumerate(self.target_lines):
+        #     if i < len(valid_angles):
+        #         angle = valid_angles[i]
+        #         x = display_distance * np.cos(np.radians(angle))
+        #         y = display_distance * np.sin(np.radians(angle))
+        #         line.setData([0, x], [0, y], pen=self.target_lines[i].pen)
+        #     else:
+        #         line.setData([], [])
+        #
+        # # Реальные позиции (остаются неизменными)
+        # for i in range(self.num_sources):
+        #     x_real = self.source_distances[i] * np.cos(np.radians(self.source_angles[i]))
+        #     y_real = self.source_distances[i] * np.sin(np.radians(self.source_angles[i]))
+        #     self.target_markers[i].setData([x_real], [y_real])
+        """Обновление карты: линии - вычисленные направления, маркеры - реальные позиции"""
+        display_distance = self.range_limit * 0.8  # 80% радиуса карты
 
-        # Расчет координат и обновление элементов
+        # Очистка предыдущих направлений
+        for line in self.target_lines:
+            line.setData([], [])
+
+        # Рисование новых направлений
+        for i, angle in enumerate(estimated_angles):
+            x = display_distance * np.cos(np.radians(angle))
+            y = display_distance * np.sin(np.radians(angle))
+            color = ['#FF0000', '#00FF00', '#0000FF'][i % 3]
+
+            self.target_lines[i].setData(
+                [0, x],
+                [0, y],
+                pen=pg.mkPen(color, width=2, style=QtCore.Qt.PenStyle.DashLine)
+            )
+
+        # Обновление реальных позиций абонентов
         for i in range(self.num_sources):
-            # Полярные -> декартовы
-            angle_rad = np.radians(self.source_angles[i])
-            x = self.source_distances[i] * np.cos(angle_rad)
-            y = self.source_distances[i] * np.sin(angle_rad)
-            positions.append((x, y))
-
-            # Линии направления
-            if i < len(self.target_lines):
-                self.target_lines[i].setData([0, x], [0, y],
-                                             pen=pg.mkPen(['#FF0000', '#00FF00', '#0000FF'][i], width=2))
-
-            # Маркеры и подписи
-            if i < len(self.target_markers):
-                self.target_markers[i].setData([x], [y])
-                self.target_labels[i].setPos(x, y)
-
-        # Сброс неиспользуемых элементов
-        for j in range(len(positions), len(self.target_markers)):
-            self.target_markers[j].setData([], [])
-            self.target_labels[j].setPos(-1000, -1000)
+            x_real = self.source_distances[i] * np.cos(np.radians(self.source_angles[i]))
+            y_real = self.source_distances[i] * np.sin(np.radians(self.source_angles[i]))
+            self.target_markers[i].setData([x_real], [y_real])
+            self.target_labels[i].setPos(x_real, y_real)
 
     def update(self):
         signals = self.generate_signals()
-        theta_range, spectrum = self.music_algorithm(signals)
+        estimated_angles, theta_range, spectrum = self.music_algorithm(signals)
 
         # Обновление графиков
         self.cartesian_curve.setData(theta_range, spectrum)
@@ -260,7 +308,7 @@ class AdvancedDOASystem:
         self.polar_curve.setData(x, y)
 
         # Обновление карты
-        self.update_map()
+        self.update_map(estimated_angles)
 
     def run(self):
         self.win.show()
