@@ -47,27 +47,6 @@ class SignalProcessor:
             self.subscribers.append(sub)
 
     def generate_signals(self, num_samples=1024, fs=2e6):
-        # num_samples = 1024
-        # signals = np.zeros((self.num_antennas, num_samples), dtype=np.complex64)
-        #
-        # for sub in self.subscribers:
-        #     # Генерация сигнала (упрощенная модель)
-        #     t = np.linspace(0, 1e-3, num_samples)
-        #     print("freq:", self.freq)
-        #     if sub['type'] == SignalType.DMR:
-        #         src_signal = np.exp(1j * 2 * np.pi * self.freq * t)
-        #
-        #     # Расчет задержек
-        #     delay_phase = np.exp(-2j * np.pi * self.freq *
-        #                          (self.antenna_pos[:, 0] * np.cos(np.radians(sub['angle'])) +
-        #                           self.antenna_pos[:, 1] * np.sin(np.radians(sub['angle']))) / 3e8)
-        #
-        #     signals += (src_signal * delay_phase[:, np.newaxis] *
-        #                 0.9 ** (sub['distance'] / 100))
-        #
-        # # Добавление шума
-        # noise = 0.1 * (np.random.randn(*signals.shape) + 1j * np.random.randn(*signals.shape))
-        # return signals + noise
         """Генерация сигналов для всех антенн"""
         signals = np.zeros((self.num_antennas, num_samples), dtype=np.complex64)
         for sub in self.subscribers:
@@ -107,11 +86,6 @@ class SignalProcessor:
         return theta_range[peaks], spectrum
 
     def calculate_spectrum(self, signals):
-        window = np.hanning(signals.shape[1])
-        fft = np.fft.fft(signals * window, axis=1)
-        fft_shifted = np.fft.fftshift(fft, axes=1)
-        power = np.abs(fft_shifted) ** 2
-        db = 10 * np.log10(power / (np.max(power) + 1e-10))
-        freqs = np.fft.fftshift(np.fft.fftfreq(
-            signals.shape[1], 1 / self.sampling_rate)) + self.freq
-        return freqs / 1e6, db.mean(axis=0)
+        spectrum = 10 * np.log10(np.abs(np.fft.fftshift(np.fft.fft(signals.mean(0)))) + 1e-10)
+        freqs = np.fft.fftshift(np.fft.fftfreq(signals.shape[1], 1 / 2e6)) / 1e6
+        return freqs, spectrum
