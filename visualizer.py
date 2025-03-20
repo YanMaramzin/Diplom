@@ -4,9 +4,11 @@ import numpy as np
 import subscribers as sub
 
 class Visualizer(QtWidgets.QWidget):
-    def __init__(self):
+    def __init__(self, subs, freq=400000000):
         super().__init__()
         self.direction_lines = []
+        self.freq = freq
+        self.subs = subs
         self.init_ui()
 
     def init_ui(self):
@@ -22,6 +24,16 @@ class Visualizer(QtWidgets.QWidget):
         self.right_panel = QtWidgets.QVBoxLayout()
         self._init_map_plot()
         self.layout.addLayout(self.right_panel)
+
+        # Поле ввода частоты
+        input_layout = QtWidgets.QHBoxLayout()
+        self.freq_input = QtWidgets.QLineEdit(str(self.freq))
+        self.freq_input.setPlaceholderText("Введите частоту (Гц)")
+        self.freq_input.editingFinished.connect(self.update_frequency)
+        input_layout.addWidget(QtWidgets.QLabel("Частота (Гц):"))
+        input_layout.addWidget(self.freq_input)
+
+        self.layout.addLayout(input_layout)
 
         # Таймер
         self.timer = QtCore.QTimer()
@@ -70,12 +82,17 @@ class Visualizer(QtWidgets.QWidget):
             pg.ScatterPlotItem(
                 symbol='o',
                 size=15,
-                pen=pg.mkPen(color),
-                brush=pg.mkBrush(color),
+                pen=pg.mkPen(subs.color),
+                brush=pg.mkBrush(subs.color),
                 name=f"Цель {i + 1}"
             )
-            for i, color in enumerate(['#FF0000', '#00FF00', '#0000FF'])
+            for i, subs in enumerate(self.subs)
         ]
+
+        for i, subs in enumerate(self.subs):
+            x, y = subs.coordinates
+            self.target_markers[i].setData([x], [y])
+
         for marker in self.target_markers:
             self.map_plot.addItem(marker)
 
@@ -93,13 +110,18 @@ class Visualizer(QtWidgets.QWidget):
         # Текстовые метки
         self.target_labels = [
             pg.TextItem(
-                text=f"Цель {i + 1}",
-                color=color,
+                text=f"Цель {i + 1}\n"
+                     f"{subs.signal_type}",
+                color=subs.color,
                 anchor=(0.5, 1.2),
                 # font=QtGui.QFont('Arial', 12)
             )
-            for i, color in enumerate(['#FF0000', '#00FF00', '#0000FF'])
+            for i, subs in enumerate(self.subs)
         ]
+
+        for i, subs in enumerate(self.subs):
+            x, y = subs.coordinates
+            self.target_labels[i].setPos(x, y)
 
         for label in self.target_labels:
             self.map_plot.addItem(label)
@@ -112,37 +134,36 @@ class Visualizer(QtWidgets.QWidget):
         for i, m in enumerate(self.cartesian_markers):
             m.setPos(angles[i] if i < len(angles) else 0)
 
-        # Спектр
-        # self.spectrum_curve.setData(freqs, spectrum_db)
-        self.update_map(subscribers)
+        self.update_map(subscribers, angles)
         self.update_spectrum(freqs, spectrum_db, subscribers)
 
-    def update_map(self, subscribers):
+    def update_map(self, subscribers, angles):
         center = (0, 0)  # Позиция пеленгатора
-        for i, sub in enumerate(subscribers):
+        for i, angle in enumerate(angles):
             # Расчет координат
-            x, y = sub.coordinates
+            x = subscribers[i].distance * np.cos(np.radians(angle))
+            y = subscribers[i].distance * np.sin(np.radians(angle))
 
             # Обновление линии направления
             if i < len(self.direction_lines):
                 self.direction_lines[i].setData(
                     [center[0], x],
                     [center[1], y],
-                    pen=pg.mkPen(sub.color, width=1.5, style=QtCore.Qt.PenStyle.DashLine)
+                    pen=pg.mkPen(subscribers[i].color, width=1.5, style=QtCore.Qt.PenStyle.DashLine)
                 )
                 self.direction_lines[i].show()
 
             # Обновление маркера
-            self.target_markers[i].setData([x], [y])
+            # self.target_markers[i].setData([x], [y])
 
-            # Обновление метки
-            self.target_labels[i].setPos(x, y)
-            self.target_labels[i].setText(
-                f"Цель {i + 1}\n"
-                f"Дистанция: {sub.distance:.0f} м\n"
-                f"Азимут: {sub.angle:.1f}°\n"
-                f"{sub.signal_type}"
-            )
+            # # Обновление метки
+            # self.target_labels[i].setPos(x, y)
+            # self.target_labels[i].setText(
+            #     f"Цель {i + 1}\n"
+            #     f"Дистанция: {subscribers[i].distance:.0f} м\n"
+            #     f"Пеленг: {subscribers[i].angle:.1f}°\n"
+            #     f"{subscribers[i].signal_type}"
+            # )
 
         # Скрытие неиспользуемых элементов
         for j in range(len(subscribers), len(self.target_markers)):
@@ -150,7 +171,7 @@ class Visualizer(QtWidgets.QWidget):
             self.target_labels[j].setText("")
 
         # Скрытие неиспользуемых линий
-        for j in range(len(subscribers), len(self.direction_lines)):
+        for j in range(len(angles), len(self.direction_lines)):
             self.direction_lines[j].hide()
 
     def update_spectrum(self, freqs_mhz: np.ndarray, spectrum_db: np.ndarray, subscribers: list[sub.Subscriber]):
@@ -158,14 +179,19 @@ class Visualizer(QtWidgets.QWidget):
         # Обновление кривой спектра
         self.spectrum_curve.setData(freqs_mhz, spectrum_db)
 
-        # Удаление старых маркеров
-        for item in self.spectrum_markers:
-            self.spectrum_plot.removeItem(item)
-        self.spectrum_markers.clear()
+        # # Удаление старых маркеров
+        # for item in self.spectrum_markers:
+        #     self.spectrum_plot.removeItem(item)
+        # self.spectrum_markers.clear()
+        #
+        # # Добавление новых маркеров
+        # for sub in subscribers:
+        #     self._add_spectrum_marker(sub, spectrum_db)
 
-        # Добавление новых маркеров
-        for sub in subscribers:
-            self._add_spectrum_marker(sub, spectrum_db)
+    def update_frequency(self):
+        """Обновление частоты из поля ввода"""
+        # new_freq = float(self.freq_input.text())
+        self.freq = float(self.freq_input.text())
 
     def _add_spectrum_marker(self, subscriber: sub.Subscriber, spectrum_db: np.ndarray):
         """Добавление маркера для одного абонента"""

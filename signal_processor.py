@@ -21,12 +21,7 @@ class SignalProcessor:
             np.sin(angles)
         ]) * (self.wavelength / 2)
 
-    def generate_subscribers(self, num_sources=3):
-        # self.subscribers = [{
-        #     'type': SignalType.DMR,
-        #     'distance': np.random.uniform(100, self.range_limit),
-        #     'angle': np.random.uniform(0, 360)
-        # } for _ in range(num_sources)]
+    def generate_subscribers(self, num_sources=5):
         """Генерация случайных абонентов"""
         self.subscribers = []
         for _ in range(num_sources):
