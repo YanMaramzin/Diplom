@@ -42,7 +42,7 @@ class DMRVisualizer(Observer):
         """Отрисовывает спектр сигнала."""
         plt.subplot(*subplot_num)
         fft = np.fft.fft(signal)
-        freqs = DMRSubscriber.CARRIER_FREQ + np.fft.fftfreq(len(signal), 1 / self.subscriber.SAMPLE_RATE)
+        freqs = np.fft.fftfreq(len(signal), 1 / self.subscriber.SAMPLE_RATE)
         plt.plot(freqs[:len(freqs) // 2] / 1e6, np.abs(fft[:len(fft) // 2]))
         # for f in self.subscriber.frequencies:
         #     plt.axvline(f, color='r', linestyle='--', alpha=0.5)

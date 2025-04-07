@@ -1,6 +1,48 @@
 import numpy as np
 import logging
 
+class TDMA:
+    """Реализация TDMA."""
+    def __init__(self, num_slots, frame_duration):
+        self.num_slots = num_slots
+        self.frame_duration = frame_duration
+        self.slot_duration = frame_duration / num_slots
+        self.slot_assignments = {} # Словарь: subscriber_id -> slot_number
+        self.logger = logging.getLogger(__name__)
+
+    def assign_slot(self, subscriber_id):
+        """Назначает слот абоненту."""
+        #  Простой алгоритм назначения: первый свободный слот
+        for slot in range(self.num_slots):
+            if slot not in self.slot_assignments.values():
+                self.slot_assignments[subscriber_id] = slot
+                return slot
+        return None # Нет свободных слотов
+
+    def get_slot_for_subscriber(self, subscriber_id):
+        """Возвращает слот, назначенный абоненту."""
+        return self.slot_assignments.get(subscriber_id)
+
+    def is_active_slot(self, subscriber_id, current_time):
+        """Проверяет, активен ли слот для данного абонента в данный момент времени."""
+        self.logger.debug(f"is_active_slot")
+        slot = self.get_slot_for_subscriber(subscriber_id)
+        if slot is None:
+            self.logger.debug(f"Subscriber {subscriber_id} - Slot not assigned")
+            return False  # Слот не назначен
+
+        #  Берем остаток от деления current_time на frame_duration
+        self.logger.debug(f"Current time before: {current_time}")
+        current_time = current_time % self.frame_duration
+        self.logger.debug(f"Current time after: {current_time}")
+
+        slot_start_time = slot * self.slot_duration
+        slot_end_time = slot_start_time + self.slot_duration
+        result = slot_start_time <= current_time < slot_end_time
+        self.logger.debug(
+            f"Subscriber {subscriber_id} - Slot: {slot}, Start: {slot_start_time:.2f}, End: {slot_end_time:.2f}, Current: {current_time:.2f}, Active: {result}")
+        return result
+
 class TDMAFrame:
     """Класс, представляющий TDMA кадр."""
     def __init__(self, num_slots, slot_duration):

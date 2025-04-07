@@ -1,7 +1,8 @@
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtWidgets
 import numpy as np
-import subscribers as sub
+from signals import subscribers as sub
+
 
 class Visualizer(QtWidgets.QWidget):
     def __init__(self, subs, freq=400000000):
@@ -49,6 +50,7 @@ class Visualizer(QtWidgets.QWidget):
         ]
         for m in self.cartesian_markers:
             self.cartesian_plot.addItem(m)
+        self.cartesian_plot.showGrid(x=True, y=True, alpha=0.3)
         self.left_panel.addWidget(self.cartesian_plot)
 
     def _init_spectrum_plot(self):
@@ -129,29 +131,32 @@ class Visualizer(QtWidgets.QWidget):
         self.right_panel.addWidget(self.map_plot)
 
     def update_plots(self, angles, spectrum, freqs, spectrum_db, subscribers: list):
+        # self.update_cartesian_curve(spectrum, angles)
+        # self.update_map(subscribers, angles)
+        self.update_spectrum(freqs, spectrum_db, subscribers)
+
+
+    def update_cartesian_curve(self, spectrum, angles):
         # Декартов график
         self.cartesian_curve.setData(np.linspace(0, 360, len(spectrum)), spectrum)
         for i, m in enumerate(self.cartesian_markers):
             m.setPos(angles[i] if i < len(angles) else 0)
 
-        self.update_map(subscribers, angles)
-        self.update_spectrum(freqs, spectrum_db, subscribers)
-
     def update_map(self, subscribers, angles):
         center = (0, 0)  # Позиция пеленгатора
         for i, angle in enumerate(angles):
             # Расчет координат
-            x = subscribers[i].distance * np.cos(np.radians(angle))
-            y = subscribers[i].distance * np.sin(np.radians(angle))
+            x = subscribers[0].distance * np.cos(np.radians(angle))
+            y = subscribers[0].distance * np.sin(np.radians(angle))
 
             # Обновление линии направления
             if i < len(self.direction_lines):
-                self.direction_lines[i].setData(
+                self.direction_lines[0].setData(
                     [center[0], x],
                     [center[1], y],
-                    pen=pg.mkPen(subscribers[i].color, width=1.5, style=QtCore.Qt.PenStyle.DashLine)
+                    pen=pg.mkPen(subscribers[0].color, width=1.5, style=QtCore.Qt.PenStyle.DashLine)
                 )
-                self.direction_lines[i].show()
+                self.direction_lines[0].show()
 
             # Обновление маркера
             # self.target_markers[i].setData([x], [y])

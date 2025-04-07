@@ -1,9 +1,9 @@
 import numpy as np
-import subscribers
+from deprecated.signals import subscribers
 from scipy import signal
 
 class SignalProcessor:
-    def __init__(self, num_antennas=8, freq=900e6, range_limit=1000):
+    def __init__(self, num_antennas=1, freq=900e6, range_limit=1000):
         self.num_antennas = num_antennas
         self.freq = freq
         self.wavelength = 3e8 / freq
@@ -21,15 +21,15 @@ class SignalProcessor:
             np.sin(angles)
         ]) * (self.wavelength / 2)
 
-    def generate_subscribers(self, num_sources=5):
+    def generate_subscribers(self, num_sources=1):
         """Генерация случайных абонентов"""
         self.subscribers = []
         for _ in range(num_sources):
             # Случайный выбор типа сигнала
-            stype = np.random.choice([subscribers.SignalType.DMR, subscribers.SignalType.TETRA])
-
+            # stype = np.random.choice([subscribers.SignalType.DMR, subscribers.SignalType.TETRA])
+            stype = subscribers.SignalType.DMR
             # Параметры абонента
-            distance = np.random.uniform(100, 1000)
+            distance = np.random.uniform(500, 1000)
             angle = np.random.uniform(0, 360)
             power = np.random.uniform(0.5, 1.0)
 
@@ -49,12 +49,14 @@ class SignalProcessor:
             src_signal = sub.generate_signal(num_samples, fs)
 
             # Применение пространственных задержек
-            delay_phase = self._calc_delay_phase(sub.angle)
-            signals += src_signal * delay_phase[:, np.newaxis]
+            # delay_phase = self._calc_delay_phase(sub.angle)
+            # signals += src_signal * delay_phase[:, np.newaxis]
+            signals += src_signal
 
         noise = 0.1 * (np.random.randn(*signals.shape) + 1j * np.random.randn(*signals.shape))
 
-        return signals + noise
+        # return signals + noise
+        return signals
 
     def _calc_delay_phase(self, angle):
         """Расчет фазовых задержек для антенной решетки"""
@@ -81,6 +83,6 @@ class SignalProcessor:
         return theta_range[peaks], spectrum
 
     def calculate_spectrum(self, signals):
-        spectrum = 10 * np.log10(np.abs(np.fft.fftshift(np.fft.fft(signals.mean(0)))) + 1e-10)
+        spectrum = 10 * np.log10(np.abs(np.fft.fftshift(np.fft.fft(signals[0]))) + 1e-10)
         freqs = np.fft.fftshift(np.fft.fftfreq(signals.shape[1], 1 / 2e6)) / 1e6
         return freqs, spectrum

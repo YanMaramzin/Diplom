@@ -1,8 +1,8 @@
 import numpy as np
 import logging
-from enum import Enum
-from abc import ABC
 from observer import Observable, EventType
+from strategy import SimulationStrategy
+import matplotlib.pyplot as plt
 
 class DMRSubscriber(Observable):
     # Параметры сигнала
@@ -20,16 +20,32 @@ class DMRSubscriber(Observable):
         (1,1): -3 * DEVIATION
     }
 
-    def __init__(self, id):
+    def __init__(self, id, latitude, longitude, simulation_strategy: SimulationStrategy, carrier_frequency, tdma):
         super().__init__()
         self.id = id
         self.SYMBOL_DURATION = 1 / self.SYMBOL_RATE  # Длительность символа
         self.SAMPLE_PER_SYMBOL = int(self.SAMPLE_RATE * self.SYMBOL_DURATION)  # Отсчетов на символ
+        self.CARRIER_FREQ = carrier_frequency  # Несущая частота
         self.frequencies = self._calculate_frequencies()
+        self.latitude = latitude # Координаты
+        self.longitude = longitude
         self.tx_buffer = [] # Буфер для передачи
         self.rx_buffer = [] # Буфер для приема
         self.communication_mode = None  # Объект, реализующий логику передачи
+        self.simulation_strategy = simulation_strategy  # Стратегия симуляции
+        self.tdma = tdma  # Добавляем TDMA
+        self.current_time = 0  # Текущее время симуляции
         self.logger = logging.getLogger(f"DMRSubscriber-{id}")  # Создаем логгер для каждого абонента
+        self.data_generation_rate = 10  # Hz - пример
+        self.num_bits = 200  # Длина сообщения
+
+    def generate_data(self, num_samples):
+        """Генерирует сообщение для передачи."""
+        self.generate_random_message(self.num_bits)
+
+    def simulate(self, subscriber2, repeater, snr_db):
+        """Запускает симуляцию с использованием выбранной стратегии."""
+        return self.simulation_strategy.simulate(self, subscriber2, snr_db)
 
     def _calculate_frequencies(self):
         """Вычисляет частоты для каждого символа на основе несущей и девиации."""
@@ -49,7 +65,8 @@ class DMRSubscriber(Observable):
             freq = self.frequencies[sym]
             samples = np.sin(2 * np.pi * freq * t)
             signal = np.concatenate((signal, samples))
-        self.logger.debug(f"Modulated signal with {len(symbols)} symbols.")
+            plt.plot(signal)
+        self.logger.info(f"Modulated signal with {len(symbols)} symbols.")
         return signal
 
     @staticmethod
@@ -117,10 +134,10 @@ class DMRSubscriber(Observable):
     def transmit(self):
         """Передает сигнал из буфера."""
         if self.tx_buffer:
-            signal = self.tx_buffer.pop(0)
-            self.logger.info("Transmitting signal.")
+            signal = self.tx_buffer[-1]  # Возвращаем последний сигнал, не удаляя его
+            self.logger.info("Returning signal for transmission.")
             self.notify(EventType.TRANSMIT, {"signal": signal})  # Уведомляем наблюдателей
-            return signal # Передаем первый сигнал из буфера
+            return signal
         else:
             self.logger.warning("No signal to transmit.")
             return None
@@ -141,3 +158,29 @@ class DMRSubscriber(Observable):
         """Устанавливает объект, реализующий логику связи."""
         self.communication_mode = communication_mode
         self.logger.info(f"Communication mode set to: {communication_mode.mode.value}")
+
+    def generate_random_message(self, num_bits):
+        """Генерирует случайное сообщение и помещает его в буфер."""
+        bit_string = ''.join(str(np.random.randint(0, 2)) for _ in range(num_bits))
+        self.prepare_message(bit_string)
+        self.logger.info(f"Сгенерировано случайное сообщение: {bit_string}")
+
+    def get_current_frequencies(self):
+      """Возвращает список текущих частот, на которых происходит излучение."""
+      #  В простейшем случае - возвращаем все частоты
+      return self.frequencies # Список частот
+
+    def should_transmit(self):
+        """Определяет, должен ли абонент передавать в данный момент времени."""
+        should = self.tdma.is_active_slot(self.id, self.current_time)
+        self.logger.debug(f"Subscriber {self.id} should_transmit: {should} at time {self.current_time}")
+        return should
+
+    def update(self, dt):
+        """Обновляет состояние абонента (например, время)."""
+        self.logger.debug(f"Updating subscriber {self.id} at time {self.current_time} with dt {dt}")
+        self.current_time += dt
+        if self.current_time % (1/self.data_generation_rate) < dt:
+            self.generate_data(int(dt * 48000)) # 48000 - sample_rate
+
+        self.logger.debug(f"Subscriber {self.id} current_time is now  {self.current_time} after update")
