@@ -13,15 +13,15 @@ def generate_noise_spectrum(frequencies, noise_power):
 def calculate_spectrum(signal, sample_rate):
     """Вычисляет спектр сигнала с использованием БПФ."""
     logger.debug("Начинаем вычисление спектра.")
-    N = len(signal)
-    logger.debug(f"Длина сигнала: {N}")
+    n = len(signal)
+    logger.debug(f"Длина сигнала: {n}")
 
     try:
         yf = np.fft.fft(signal)
-        xf = np.fft.fftfreq(N, 1 / sample_rate)
+        xf = np.fft.fftfreq(n, 1 / sample_rate)
         logger.debug("БПФ успешно вычислен.")
-        frequencies = xf[:N//2]
-        amplitudes = np.abs(yf[:N//2])
+        frequencies = xf[:n//2]
+        amplitudes = np.abs(yf[:n//2])
         logger.debug(f"Количество частот: {len(frequencies)}, количество амплитуд: {len(amplitudes)}")
         return frequencies, amplitudes
     except Exception as e:
@@ -55,9 +55,9 @@ def generate_dmr_signal(subscriber, num_samples, sample_rate):
         logger.debug(f"Длина сигнала после: {len(signal)}")
 
         # Добавляем шум
-        min_noise_power = 0.1  # Минимальный уровень шума
+        min_noise_power = 0.0001  # Минимальный уровень шума
         signal_power = np.mean(np.abs(signal)**2)
-        noise_power = max(min_noise_power, 0.1 * signal_power)  # Уровень шума
+        noise_power = max(min_noise_power, 0.001 * signal_power)  # Уровень шума
         noise = np.sqrt(noise_power / 2) * np.random.randn(num_samples)  # Генерируем шум
 
         #  Убеждаемся, что шум имеет ту же длину, что и сигнал

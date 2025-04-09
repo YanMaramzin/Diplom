@@ -63,7 +63,7 @@ class DMRSubscriber(Observable):
         signal = np.array([])
         for sym in symbols:
             freq = self.frequencies[sym]
-            samples = np.sin(2 * np.pi * freq * t)
+            samples = 1e10 * np.sin(2 * np.pi * freq * t)
             signal = np.concatenate((signal, samples))
             plt.plot(signal)
         self.logger.info(f"Modulated signal with {len(symbols)} symbols.")

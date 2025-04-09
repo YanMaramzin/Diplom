@@ -1,8 +1,8 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QPushButton, QListWidget, QListWidgetItem,
-                             QSizePolicy, QLineEdit, QGraphicsRectItem, QGraphicsLineItem)
+                             QGraphicsRectItem, QSplitter)
 from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QColor, QBrush
+from PyQt5.QtGui import QColor, QBrush, QPen
 import pyqtgraph as pg
 import numpy as np
 from signal_processing import calculate_spectrum, generate_dmr_signal, generate_noise_spectrum
@@ -127,13 +127,32 @@ class MapView(pg.PlotWidget):
         self.subscribers = []
         self.showGrid(x=True, y=True, alpha=0.5)
         self.main_window = main_window  # Сохраняем ссылку на главное окно
+        self.direction_finder_position = (0, 0)  # Пример координат
+        self.direction_finder_item = None
+        self.direction_lines = {}  # Словарь для хранения линий направления
+
+        self.add_direction_finder()  # Добавляем пеленгатор при инициализации
+
+    def add_direction_finder(self):
+        """Добавляет пеленгатор на карту."""
+        #  Задаем координаты пеленгатора,
+        #  создаем элемент ScatterPlotItem для пеленгатора
+        self.direction_finder_item = pg.ScatterPlotItem(
+            pos=[self.direction_finder_position],
+            size=15,
+            brush=QBrush(QColor(0, 255, 0)),  # Зеленый цвет
+            symbol='o'  # Круг
+        )
+        self.addItem(self.direction_finder_item)
 
     def set_subscribers(self, subscribers):
         """Устанавливает список абонентов и обновляет карту."""
         self.subscribers = subscribers
         self.clear()
+        self.add_direction_finder()  # Перерисовываем пеленгатор
         for subscriber in subscribers:
             self.add_subscriber(subscriber)
+            self.draw_direction_line(subscriber)  # Рисуем линию направления
 
     def add_subscriber(self, subscriber):
         """Добавляет абонента на карту."""
@@ -165,25 +184,85 @@ class MapView(pg.PlotWidget):
             self.removeItem(text)
         self.texts = []
 
+        # Удаляем линии направления
+        for line in self.direction_lines.values():
+            self.removeItem(line)
+        self.direction_lines = {}
+
     def subscriber_clicked(self, item, points):
         """Обработчик клика на абоненте."""
         subscriber = item.subscriber  # Получаем абонента, связанного с маркером
         self.main_window.subscriber_info.set_subscriber(subscriber)  # Обновляем информацию
 
+    def calculate_bearing(self, subscriber):
+        """Рассчитывает пеленг на абонента."""
+        #  Получаем координаты абонента
+        lon = subscriber.longitude
+        lat = subscriber.latitude
+
+        #  Получаем координаты пеленгатора
+        df_lon, df_lat = self.direction_finder_position
+
+        #  Преобразуем координаты в радианы
+        df_lat_rad = np.radians(df_lat)
+        df_lon_rad = np.radians(df_lon)
+        lat_rad = np.radians(lat)
+        lon_rad = np.radians(lon)
+
+        #  Вычисляем разницу долгот
+        delta_lon = lon_rad - df_lon_rad
+
+        #  Вычисляем пеленг
+        y = np.sin(delta_lon) * np.cos(lat_rad)
+        x = np.cos(df_lat_rad) * np.sin(lat_rad) - np.sin(df_lat_rad) * np.cos(lat_rad) * np.cos(delta_lon)
+        bearing_rad = np.arctan2(y, x)
+
+        #  Преобразуем пеленг в градусы
+        bearing_deg = np.degrees(bearing_rad)
+        bearing_deg = (bearing_deg + 360) % 360  # Нормализуем пеленг в диапазон [0, 360)
+
+        return bearing_deg
+
+    def draw_direction_line(self, subscriber):
+        """Рисует линию направления на абонента."""
+        #  Рассчитываем пеленг
+        bearing = self.calculate_bearing(subscriber)
+
+        #  Получаем координаты абонента
+        lon = subscriber.longitude
+        lat = subscriber.latitude
+
+        #  Получаем координаты пеленгатора
+        df_lon, df_lat = self.direction_finder_position
+
+        #  Вычисляем конечную точку линии
+        length = 500  # Длина линии
+        end_lon = df_lon + length * np.sin(np.radians(bearing))
+        end_lat = df_lat + length * np.cos(np.radians(bearing))
+
+        #  Создаем линию
+        line = pg.PlotDataItem(
+            x=[df_lon, end_lon],
+            y=[df_lat, end_lat],
+            pen=QPen(QColor(0, 255, 0))  # Зеленый цвет, толщина 2
+        )
+
+        #  Добавляем линию на карту
+        self.addItem(line)
+        self.direction_lines[subscriber.id] = line  # Сохраняем линию в словаре
+
 class SpectrumView(pg.PlotWidget):
     """Виджет для отображения спектра."""
-    def __init__(self, sample_rate, main_window):
+    def __init__(self, sample_rate):
         super().__init__()
         self.setBackground('w')
         self.pen = pg.mkPen(color='b', width=2)
         self.x = []
         self.y = []
         self.curve = self.plot(self.x, self.y, pen=self.pen)
-        self.setYRange(0, 1)
         self.showGrid(x=True, y=True, alpha=0.5)
         self.sample_rate = sample_rate # Добавляем sample_rate
         self.freq_lines = []  # Список линий
-        self.main_window = main_window
 
         self.min_frequency = 0
         self.max_frequency = sample_rate / 2  # По умолчанию - половина частоты дискретизации
@@ -208,7 +287,7 @@ class SpectrumView(pg.PlotWidget):
 
         self.x = frequencies
         self.y = spectrum_data
-        self.curve.setData(self.x / 1e6, self.y)
+        self.curve.setData(self.x / 1e6, np.log10(self.y + 0.1))
 
         # Удаляем старые отметки
         # self.clear_frequency_markers()
@@ -245,100 +324,151 @@ class MainWindow(QWidget):
         self.setGeometry(100, 100, 1000, 700)
         self.subscribers = subscribers  # Передаем список абонентов
         self.sample_rate = sample_rate
-        self.mapView = MapView(self)
-        self.spectrumView = SpectrumView(self.sample_rate, self) # Передаем sample_rate
 
         # TDMA parameters
         self.num_slots = 4
         self.frame_duration = 0.1  # seconds
         self.tdma = TDMA(self.num_slots, self.frame_duration)
 
-        # Контроллеры
-        self.subscriber_manager = SubscriberManager(self.tdma) #  Передаем TDMA
-        self.map_controller = MapController(self.mapView)
-        self.spectrum_controller = SpectrumController(self.spectrumView, self.sample_rate)
+        self.subscriber_manager = SubscriberManager(self.tdma)  # Передаем TDMA
 
         self.init_ui()
-        self.mapView.set_subscribers(self.subscribers)
-        self.populate_subscriber_list()  # Заполняем список сразу после создания
+        # Контроллеры
+        self.map_controller = MapController(self.map)
+        self.spectrum_controller = SpectrumController(self.spectrum_view, self.sample_rate)
+
+        self.map.set_subscribers(self.subscribers)
+        # self.populate_subscriber_list()  # Заполняем список сразу после создания
         self.logger = logging.getLogger(__name__)
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_data)
         self.timer.start(100)  # Обновление каждые 100 мс (можно изменить)
 
     def init_ui(self):
-        # Основной layout (теперь вертикальный)
-        mainLayout = QVBoxLayout()
+        self.map = MapView(self.subscriber_manager)
+        # self.map.setFixedSize(400, 400)
 
-        # Верхняя панель (информация и управление)
-        topPanel = QHBoxLayout()
+        #  График спектра
+        self.spectrum_view = SpectrumView(self.sample_rate)
+        # self.spectrum_view.plot_widget.setLabel('bottom', 'Frequency', units='Hz')
+        # self.spectrum_view.plot_widget.setLabel('left', 'Amplitude')
 
-        # 1. Число абонентов
-        self.numSubscribersLabel = QLabel(f"Number of Subscribers: {len(self.subscribers)}")
-        topPanel.addWidget(self.numSubscribersLabel)
+        #  Список абонентов и кнопка "Добавить"
+        self.subscriber_list = QListWidget()
+        self.add_subscriber_button = QPushButton("Добавить абонента")
+        self.add_subscriber_button.clicked.connect(self.add_subscriber)
+        subscriber_layout = QVBoxLayout()
+        subscriber_layout.addWidget(self.add_subscriber_button)
+        subscriber_layout.addWidget(self.subscriber_list)
+        subscriber_widget = QWidget()
+        subscriber_widget.setLayout(subscriber_layout)
 
-        # 2. Кнопка "Add Subscriber"
-        self.addSubscriberButton = QPushButton("Add Subscriber")
-        self.addSubscriberButton.clicked.connect(self.add_subscriber)
-        topPanel.addWidget(self.addSubscriberButton)
-
-        # Список абонентов
-        self.subscriberListWidget = QListWidget()
-        self.subscriberListWidget.itemClicked.connect(self.show_subscriber_details)
-        self.update_subscriber_list() # Заполняем список абонентов
-        leftPanelWidget = QWidget() #Чтобы растянуть список по вертикали
-        listLayout = QVBoxLayout()
-        listLayout.addWidget(self.subscriberListWidget)
-        leftPanelWidget.setLayout(listLayout)
-        leftPanelWidget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)  # Растягиваем по вертикали
-        self.subscriberListWidget.itemClicked.connect(self.subscriber_list_item_clicked)  # Подключаем сигнал
-        topPanel.addWidget(leftPanelWidget)
-
-        # Панель графиков (Карта и Спектр)
-        graphPanel = QHBoxLayout()
-        # Карта
-        # self.update_map() # Отображаем абонентов на карте
-        graphPanel.addWidget(self.mapView)
-
-        # Subscriber Info Widget
-        self.subscriber_info = SubscriberInfoWidget()
-        topPanel.addWidget(self.subscriber_info)
-
-        # Спектр
-        graphPanel.addWidget(self.spectrumView)
-
+        #  График TDMA-слотов
         self.tdma_view = TDMAView(self.num_slots, self.frame_duration)
-        graphPanel.addWidget(self.tdma_view)
+        self.tdma_view.plot.setLabel('bottom', 'Time', units='s')
+        self.tdma_view.plot.setLabel('left', 'Slot')
+        tdma_layout = QVBoxLayout()
+        tdma_layout.addWidget(self.tdma_view)
+        tdma_widget = QWidget()
+        tdma_widget.setLayout(tdma_layout)
 
-        # Добавляем панели в основной layout
-        mainLayout.addLayout(topPanel)
-        mainLayout.addLayout(graphPanel)
-        self.setLayout(mainLayout)
+        #  Создаем горизонтальный разделитель для карты и спектра
+        left_splitter = QSplitter(Qt.Vertical)
+        left_splitter.addWidget(self.map)
+        left_splitter.addWidget(self.spectrum_view)
+        left_splitter.setSizes([300, 100])
 
-        # Элементы управления для задания диапазона частот (МГц)
-        frequency_range_layout = QHBoxLayout()
+        #  Создаем вертикальный разделитель для списка абонентов и TDMA
+        right_splitter = QSplitter(Qt.Vertical)
+        right_splitter.addWidget(subscriber_widget)
+        right_splitter.addWidget(tdma_widget)
+        right_splitter.setSizes([100, 300])
 
-        self.min_frequency_label = QLabel("Min Frequency (MHz):")
-        frequency_range_layout.addWidget(self.min_frequency_label)
+        #  Создаем главный разделитель для левой и правой частей
+        main_splitter = QSplitter(Qt.Horizontal)
+        main_splitter.addWidget(left_splitter)
+        main_splitter.addWidget(right_splitter)
+        main_splitter.setSizes([300, 100])
 
-        self.min_frequency_input = QLineEdit()
-        self.min_frequency_input.setText("0.0")  # Значение по умолчанию
-        frequency_range_layout.addWidget(self.min_frequency_input)
+        #  Создаем главный макет
+        main_layout = QHBoxLayout()
+        main_layout.addWidget(main_splitter)
+        self.setLayout(main_layout)
 
-        self.max_frequency_label = QLabel("Max Frequency (MHz):")
-        frequency_range_layout.addWidget(self.max_frequency_label)
+        self.setWindowTitle("DMR Simulator")
 
-        self.max_frequency_input = QLineEdit()
-        self.max_frequency_input.setText(
-            str(self.sample_rate / 2e6))  # Значение по умолчанию (половина частоты дискретизации)
-        frequency_range_layout.addWidget(self.max_frequency_input)
-
-        self.set_frequency_range_button = QPushButton("Set Frequency Range")
-        self.set_frequency_range_button.clicked.connect(self.set_frequency_range)
-        frequency_range_layout.addWidget(self.set_frequency_range_button)
-
-        # Добавляем layout с элементами управления в основной layout
-        mainLayout.addLayout(frequency_range_layout)
+        # # Основной layout (теперь вертикальный)
+        # mainLayout = QVBoxLayout()
+        #
+        # # Верхняя панель (информация и управление)
+        # topPanel = QHBoxLayout()
+        #
+        # # 1. Число абонентов
+        # self.numSubscribersLabel = QLabel(f"Number of Subscribers: {len(self.subscribers)}")
+        # topPanel.addWidget(self.numSubscribersLabel)
+        #
+        # # 2. Кнопка "Add Subscriber"
+        # self.addSubscriberButton = QPushButton("Add Subscriber")
+        # self.addSubscriberButton.clicked.connect(self.add_subscriber)
+        # topPanel.addWidget(self.addSubscriberButton)
+        #
+        # # Список абонентов
+        # self.subscriberListWidget = QListWidget()
+        # self.subscriberListWidget.itemClicked.connect(self.show_subscriber_details)
+        # self.update_subscriber_list() # Заполняем список абонентов
+        # leftPanelWidget = QWidget() #Чтобы растянуть список по вертикали
+        # listLayout = QVBoxLayout()
+        # listLayout.addWidget(self.subscriberListWidget)
+        # leftPanelWidget.setLayout(listLayout)
+        # leftPanelWidget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)  # Растягиваем по вертикали
+        # self.subscriberListWidget.itemClicked.connect(self.subscriber_list_item_clicked)  # Подключаем сигнал
+        # topPanel.addWidget(leftPanelWidget)
+        #
+        # # Панель графиков (Карта и Спектр)
+        # graphPanel = QHBoxLayout()
+        # # Карта
+        # # self.update_map() # Отображаем абонентов на карте
+        # graphPanel.addWidget(self.mapView)
+        #
+        # # Subscriber Info Widget
+        # self.subscriber_info = SubscriberInfoWidget()
+        # topPanel.addWidget(self.subscriber_info)
+        #
+        # # Спектр
+        # graphPanel.addWidget(self.spectrumView)
+        #
+        # self.tdma_view = TDMAView(self.num_slots, self.frame_duration)
+        # graphPanel.addWidget(self.tdma_view)
+        #
+        # # Добавляем панели в основной layout
+        # mainLayout.addLayout(topPanel)
+        # mainLayout.addLayout(graphPanel)
+        # self.setLayout(mainLayout)
+        #
+        # # Элементы управления для задания диапазона частот (МГц)
+        # frequency_range_layout = QHBoxLayout()
+        #
+        # self.min_frequency_label = QLabel("Min Frequency (MHz):")
+        # frequency_range_layout.addWidget(self.min_frequency_label)
+        #
+        # self.min_frequency_input = QLineEdit()
+        # self.min_frequency_input.setText("0.0")  # Значение по умолчанию
+        # frequency_range_layout.addWidget(self.min_frequency_input)
+        #
+        # self.max_frequency_label = QLabel("Max Frequency (MHz):")
+        # frequency_range_layout.addWidget(self.max_frequency_label)
+        #
+        # self.max_frequency_input = QLineEdit()
+        # self.max_frequency_input.setText(
+        #     str(self.sample_rate / 2e6))  # Значение по умолчанию (половина частоты дискретизации)
+        # frequency_range_layout.addWidget(self.max_frequency_input)
+        #
+        # self.set_frequency_range_button = QPushButton("Set Frequency Range")
+        # self.set_frequency_range_button.clicked.connect(self.set_frequency_range)
+        # frequency_range_layout.addWidget(self.set_frequency_range_button)
+        #
+        # # Добавляем layout с элементами управления в основной layout
+        # mainLayout.addLayout(frequency_range_layout)
 
     def add_subscriber(self):
         """Добавляет нового абонента (сигнал должен прийти из основного приложения)."""
@@ -411,13 +541,13 @@ class MainWindow(QWidget):
         subscriber = item.subscriber  # Получаем абонента
         self.subscriber_info.set_subscriber(subscriber)  # Обновляем информацию
 
-    def populate_subscriber_list(self):
-        """Заполняет QListWidget списком абонентов."""
-        self.subscriberListWidget.clear() #  Очищаем список перед заполнением
-        for subscriber in self.subscriber_manager.get_subscribers():
-            item = QListWidgetItem(f"ID: {subscriber.id}, Lat: {subscriber.latitude:.2f}, Lon: {subscriber.longitude:.2f}")
-            item.subscriber = subscriber  # Сохраняем ссылку на абонента
-            self.subscriberListWidget.addItem(item)
+    # def populate_subscriber_list(self):
+    #     """Заполняет QListWidget списком абонентов."""
+    #     self.subscriberListWidget.clear() #  Очищаем список перед заполнением
+    #     for subscriber in self.subscriber_manager.get_subscribers():
+    #         item = QListWidgetItem(f"ID: {subscriber.id}, Lat: {subscriber.latitude:.2f}, Lon: {subscriber.longitude:.2f}")
+    #         item.subscriber = subscriber  # Сохраняем ссылку на абонента
+    #         self.subscriberListWidget.addItem(item)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
